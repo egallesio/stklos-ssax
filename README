@@ -1,0 +1,7 @@
+This is a port of Oleg Kiselyov's XML parser (SSAX) for STklos
+
+The directory build contains the sources files to build the package
+source and its tests. To rebuild the source, just go in the build
+directory and issue a make. This is only needed if you modify the file 
+SSAX.scm
+

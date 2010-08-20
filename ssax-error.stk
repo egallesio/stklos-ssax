@@ -1,0 +1,58 @@
+;;;;
+;;;; ssax-error.stk	-- The wraning and error procedure of SSAX
+;;;; 
+;;;; Copyright © 2007 Erick Gallesio - I3S-CNRS/ESSI <eg@essi.fr>
+;;;; 
+;;;; 
+;;;; This program is free software; you can redistribute it and/or modify
+;;;; it under the terms of the GNU General Public License as published by
+;;;; the Free Software Foundation; either version 2 of the License, or
+;;;; (at your option) any later version.
+;;;; 
+;;;; This program is distributed in the hope that it will be useful,
+;;;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;;; GNU General Public License for more details.
+;;;; 
+;;;; You should have received a copy of the GNU General Public License
+;;;; along with this program; if not, write to the Free Software
+;;;; Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, 
+;;;; USA.
+;;;; 
+;;;;           Author: Erick Gallesio [eg@essi.fr]
+;;;;    Creation date: 11-Jul-2007 10:00 (eg)
+;;;; Last file update: 17-Jul-2007 10:23 (eg)
+;;;;
+
+(define (print-position port)
+  (eprintf "*** Problem detected near line ~S of ~S\n "
+	   (port-current-position port) port))
+  
+
+(define (ssax:warn port msg . other-msg)
+  (print-position port)
+  (eprintf "*** Warning: ~A" msg)
+  (for-each (lambda (x) (display x (current-error-port))) other-msg) 
+  (newline (current-error-port)))
+
+
+(define (parser-error port msg . specializing-msgs)
+  (print-position port)
+  (apply error (cons msg specializing-msgs)))
+
+;; ----------------------------------------------------------------------
+;; 	Exported procedures ...
+;; ----------------------------------------------------------------------
+(define (ssax:set-parser-error-proc! proc)
+  (if (procedure? proc)
+      (let ((old parser-error))
+	(set! parser-error proc)
+	old)
+      (error "bad procedure ~S" proc)))
+
+(define (ssax:set-parser-warning-proc! proc)
+  (if (procedure? proc)
+      (let ((old ssax:warn))
+	(set! ssax:warn proc)
+	old)
+      (error "bad procedure ~S" proc)))

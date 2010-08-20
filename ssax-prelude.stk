@@ -1,0 +1,596 @@
+; STklos-enabled version of Oleg Kiselyov's Standard Scheme "Prelude"
+;
+
+(define cons* list*)
+
+(define (string-concatenate/shared lst)		
+  (apply string-append lst))
+
+(define (string-concatenate-reverse/shared lst)		
+  (apply string-append (reverse! lst)))
+
+;;; assert truth of an expression (or a sequence of expressions)
+;;; if there is more than one expression, they're 'AND'ed
+(define-macro (assert . x)
+  (if (null? (cdr x))
+      `(or ,@x (error "failed assertion" ',@x))
+      `(or (and ,@x) (error "failed assertion" '(,@x)))))
+
+;;; Some useful increment/decrement operators
+;;
+;;(define-macro (++! x) `(set! ,x (fx+ 1 ,x)))
+(define-macro (++ x) `(fx+ ,x 1))
+;;(define-macro (--! x) `(set! ,x (fx- ,x 1)))
+(define-macro (-- x) `(fx- ,x 1))
+
+(define-macro (inc x) `(fx+ 1 ,x))
+
+; Some useful control operators
+			; if condition is true, execute stmts in turn
+			; and return the result of the last statement
+			; otherwise, return #f
+(define-macro (when condition . stmts)
+  `(and ,condition (begin ,@stmts)))
+  
+			; Execute a sequence of forms and return the
+			; result of the _first_ one. Like PROG1 in Lisp.
+			; Typically used to evaluate one or more forms with
+			; side effects and return a value that must be
+			; computed before some or all of the side effects
+			; happen.
+(define-macro (begin0 form . forms)
+  (let ((var (gensym)))
+    `(let ((,var ,form)) ,@forms ,var)))
+
+
+			; Is str the empty string?
+			; string-null? str -> bool
+			; See Olin Shiver's Underground String functions
+(define-macro (string-null? str) `(zero? (string-length ,str)))
+
+
+; Like let* but allowing for multiple-value bindings
+(define-macro (let*-values bindings . body)
+  (if (null? bindings) (cons 'begin body)
+      (apply (lambda (vars initializer)
+	 (let ((cont 
+		(cons 'let*-values
+		      (cons (cdr bindings) body))))
+	   (cond
+	    ((not (pair? vars))		; regular let case, a single var
+	     `(let ((,vars ,initializer)) ,cont))
+	    ((null? (cdr vars))		; single var, see the prev case
+	     `(let ((,(car vars) ,initializer)) ,cont))
+	   (else			; the most generic case
+	    `(receive ,vars ,initializer ,cont)))))
+       (car bindings))))
+
+
+; **********************************************************************
+; Utilities 
+
+;------------------------------------------------------------------------
+;                               Iterator ANY?
+;
+; -- procedure+: any? PRED COLLECTION
+;       Searches for the first element in the collection satisfying a
+;       given predicate
+;       That is, the procedure applies PRED to every element of the
+;       COLLECTION in turn.
+;       The first element for which PRED returns non-#f stops the iteration;
+;       the value of the predicate is returned.
+;       If none of the elements of the COLLECTION satisfy the predicate,
+;       the return value from the procedure is #f
+;       COLLECTION can be a list, a vector, a string, or an input port.
+
+(define (any? <pred?> coll)
+  (cond
+    ((list? coll)
+      (let loop ((curr-l coll))
+        (if (null? curr-l) #f
+          (or (<pred?> (car curr-l)) (loop (cdr curr-l))))))
+          
+    ((vector? coll)
+      (let ((len (vector-length coll)))
+       (let loop ((i 0))
+        (if (>= i len) #f
+          (or (<pred?> (vector-ref coll i)) (loop (+ 1 i)))))))
+
+    ((string? coll)
+      (let ((len (string-length coll)))
+       (let loop ((i 0))
+        (if (>= i len) #f
+          (or (<pred?> (string-ref coll i)) (loop (+ 1 i)))))))
+
+    ((input-port? coll)
+      (let loop ((c (read-char coll)))
+        (if (eof-object? c) #f
+          (or (<pred?> c) (loop (read-char coll))))))
+
+    (else (error "any? on an invalid collection"))))
+
+
+;------------------------------------------------------------------------
+         	; Return the index of the first occurence of a-char in str, or #f
+(define (string-index str a-char)
+  (let ((len (string-length str)))
+    (let loop ((pos 0))
+      (cond
+	((>= pos len) #f) ; whole string has been searched, in vain
+	((char=? a-char (string-ref str pos)) pos)
+	(else (loop (+ 1 pos)))))))
+
+
+;****************************************************************************
+;			Simple Parsing of input
+;
+; The following simple functions surprisingly often suffice to parse
+; an input stream. They either skip, or build and return tokens,
+; according to inclusion or delimiting semantics. The list of
+; characters to expect, include, or to break at may vary from one
+; invocation of a function to another. This allows the functions to
+; easily parse even context-sensitive languages.
+;
+; EOF is generally frowned on, and thrown up upon if encountered.
+; Exceptions are mentioned specifically. The list of expected characters 
+; (characters to skip until, or break-characters) may include an EOF
+; "character", which is to be coded as symbol *eof*
+;
+; The input stream to parse is specified as a PORT, which is usually
+; the last (and optional) argument. It defaults to the current input
+; port if omitted.
+;
+; IMPORT
+; This package relies on a function parser-error, which must be defined
+; by a user of the package. The function has the following signature:
+;	parser-error PORT MESSAGE SPECIALISING-MSG*
+; Many procedures of this package call parser-error to report a parsing
+; error.  The first argument is a port, which typically points to the
+; offending character or its neighborhood. Most of the Scheme systems
+; let the user query a PORT for the current position. MESSAGE is the
+; description of the error. Other arguments supply more details about
+; the problem.
+;
+
+; Concise and efficient definition of a function that takes one or two
+; optional arguments, e.g.,
+;
+; (define-opt (foo arg1 arg2 (optional (arg3 init3) (arg4 init4))) body)
+;
+; define-opt is identical to a regular define, with one exception: the
+; last argument may have a form
+;	(optional (binding init) ... )
+
+(define-macro (define-opt bindings body . body-rest)
+  (let* ((rev-bindings (reverse bindings))
+	 (opt-bindings
+	  (and (pair? rev-bindings) (pair? (car rev-bindings))
+	       (eq? 'optional (caar rev-bindings))
+	       (cdar rev-bindings))))
+    (if opt-bindings
+	`(define ,(append (reverse
+			   (cons (with-input-from-string "#!optional" read)
+				 (cdr rev-bindings)))
+			  opt-bindings)
+	   ,body ,@body-rest)
+	`(define ,bindings ,body ,@body-rest))))
+
+;------------------------------------------------------------------------
+
+; -- procedure+: peek-next-char [PORT]
+; 	advances to the next character in the PORT and peeks at it.
+; 	This function is useful when parsing LR(1)-type languages
+; 	(one-char-read-ahead).
+;	The optional argument PORT defaults to the current input port.
+
+(define-opt (peek-next-char (optional (port (current-input-port))))
+  (read-char port) 
+  (peek-char port)) 
+
+
+;------------------------------------------------------------------------
+
+; -- procedure+: assert-curr-char CHAR-LIST STRING [PORT]
+;	Reads a character from the PORT and looks it up
+;	in the CHAR-LIST of expected characters
+;	If the read character was found among expected, it is returned
+;	Otherwise, the procedure writes a nasty message using STRING
+;	as a comment, and quits.
+;	The optional argument PORT defaults to the current input port.
+;
+(define-opt (assert-curr-char expected-chars comment
+			      (optional (port (current-input-port))))
+  (let ((c (read-char port)))
+    (if (memq c expected-chars) c
+    (parser-error port "Wrong character " c
+    	   " (0x" (if (eof-object? c) "*eof*"
+    	   	    (number->string (char->integer c) 16)) ") "
+    	   comment ". " expected-chars " expected"))))
+    	   
+
+; -- procedure+: skip-until CHAR-LIST [PORT]
+;	Reads and skips characters from the PORT until one of the break
+;	characters is encountered. This break character is returned.
+;	The break characters are specified as the CHAR-LIST. This list
+;	may include EOF, which is to be coded as a symbol *eof*
+;
+; -- procedure+: skip-until NUMBER [PORT]
+;	Skips the specified NUMBER of characters from the PORT and returns #f
+;
+;	The optional argument PORT defaults to the current input port.
+
+
+(define-opt (skip-until arg (optional (port (current-input-port))) )
+  (cond
+   ((number? arg)		; skip 'arg' characters
+      (do ((i arg (-- i)))
+      	  ((<= i 0) #f)
+      	  (if (eof-object? (read-char port))
+      	    (parser-error port "Unexpected EOF while skipping "
+			 arg " characters"))))
+   (else			; skip until break-chars (=arg)
+     (let loop ((c (read-char port)))
+       (cond
+         ((memv c arg) c)
+         ((eof-object? c)
+           (if (memv '*eof* arg) c
+             (parser-error port "Unexpected EOF while skipping until " arg)))
+         (else (loop (read-char port))))))))
+
+
+; -- procedure+: skip-while CHAR-LIST [PORT]
+;	Reads characters from the PORT and disregards them,
+;	as long as they are mentioned in the CHAR-LIST.
+;	The first character (which may be EOF) peeked from the stream
+;	that is NOT a member of the CHAR-LIST is returned. This character
+;	is left on the stream.
+;	The optional argument PORT defaults to the current input port.
+
+(define-opt (skip-while skip-chars (optional (port (current-input-port))) )
+  (do ((c (peek-char port) (peek-char port)))
+      ((not (memv c skip-chars)) c)
+      (read-char port)))
+ 
+; whitespace const
+
+;------------------------------------------------------------------------
+;				Stream tokenizers
+
+
+; -- procedure+: 
+;    next-token PREFIX-CHAR-LIST BREAK-CHAR-LIST [COMMENT-STRING] [PORT]
+;	skips any number of the prefix characters (members of the
+;	PREFIX-CHAR-LIST), if any, and reads the sequence of characters
+;	up to (but not including) a break character, one of the
+;	BREAK-CHAR-LIST.
+;	The string of characters thus read is returned.
+;	The break character is left on the input stream
+;	The list of break characters may include EOF, which is to be coded as
+;	a symbol *eof*. Otherwise, EOF is fatal, generating an error message
+;	including a specified COMMENT-STRING (if any)
+;
+;	The optional argument PORT defaults to the current input port.
+;
+; Note: since we can't tell offhand how large the token being read is
+; going to be, we make a guess, pre-allocate a string, and grow it by
+; quanta if necessary. The quantum is always the length of the string
+; before it was extended the last time. Thus the algorithm does
+; a Fibonacci-type extension, which has been proven optimal.
+; Note, explicit port specification in read-char, peek-char helps.
+
+; Procedure input-parse:init-buffer
+; returns an initial buffer for next-token* procedures.
+; The input-parse:init-buffer may allocate a new buffer per each invocation:
+;	(define (input-parse:init-buffer) (make-string 32))
+; Size 32 turns out to be fairly good, on average.
+; That policy is good only when a Scheme system is multi-threaded with
+; preemptive scheduling, or when a Scheme system supports shared substrings.
+; In all the other cases, it's better for input-parse:init-buffer to
+; return the same static buffer. next-token* functions return a copy
+; (a substring) of accumulated data, so the same buffer can be reused.
+; We shouldn't worry about new token being too large: next-token will use
+; a larger buffer automatically. Still, the best size for the static buffer
+; is to allow most of the tokens to fit in.
+; Using a static buffer _dramatically_ reduces the amount of produced garbage
+; (e.g., during XML parsing).
+(define input-parse-buffer (make-parameter #f))
+
+(define input-parse:init-buffer
+  (lambda ()
+    (or
+      (input-parse-buffer)
+      (let ((buffer (make-string 512)))
+        (input-parse-buffer buffer)
+        buffer))))
+
+(define-opt (next-token prefix-skipped-chars break-chars
+			(optional (comment "") (port (current-input-port))) )
+  (let* ((buffer (input-parse:init-buffer))
+	 (curr-buf-len (string-length buffer)) (quantum 16))
+    (let loop ((i 0) (c (skip-while prefix-skipped-chars port)))
+      (cond
+        ((memq c break-chars) (substring buffer 0 i))
+    	((eof-object? c)
+    	  (if (memq '*eof* break-chars)
+    	    (substring buffer 0 i)		; was EOF expected?
+    	    (parser-error port "EOF while reading a token " comment)))
+    	(else
+    	  (if (>= i curr-buf-len)	; make space for i-th char in buffer
+    	    (begin			; -> grow the buffer by the quantum
+    	      (set! buffer (string-append buffer (make-string quantum)))
+    	      (set! quantum curr-buf-len)
+    	      (set! curr-buf-len (string-length buffer))))
+    	  (string-set! buffer i c)
+    	  (read-char port)			; move to the next char
+    	  (loop (++ i) (peek-char port))
+    	  )))))
+    	
+
+; Another version of next-token, accumulating characters in a list rather
+; than in a string buffer. I heard that it tends to work faster.
+; In reality, it works just as fast as the string buffer version above,
+; but it allocates 50% more memory and thus has to run garbage collection
+; 50% as many times. See next-token-comp.scm
+
+(define-opt (next-token-list-based prefix-skipped-chars break-chars
+		  (optional (comment "") (port (current-input-port))) )
+  (let* ((first-char (skip-while prefix-skipped-chars port))
+         (accum-chars (cons first-char '())))
+    (cond 
+      ((eof-object? first-char)
+        (if (memq '*eof* break-chars) ""
+          (parser-error port "EOF while skipping before reading token "
+		       comment)))
+      ((memq first-char break-chars) "")
+      (else
+        (read-char port)		; consume the first-char
+        (let loop ((tail accum-chars) (c (peek-char port)))
+          (cond
+            ((memq c break-chars) (list->string accum-chars))
+            ((eof-object? c)
+              (if (memq '*eof* break-chars)
+                (list->string accum-chars)		; was EOF expected?
+                (parser-error port "EOF while reading a token " comment)))
+            (else
+              (read-char port)		; move to the next char
+              (set-cdr! tail (cons c '()))
+              (loop (cdr tail) (peek-char port))
+        )))))))
+
+
+; -- procedure+: next-token-of INC-CHARSET [PORT]
+;	Reads characters from the PORT that belong to the list of characters
+;	INC-CHARSET. The reading stops at the first character which is not
+;	a member of the set. This character is left on the stream.
+;	All the read characters are returned in a string.
+;
+; -- procedure+: next-token-of PRED [PORT]
+;	Reads characters from the PORT for which PRED (a procedure of one
+;	argument) returns non-#f. The reading stops at the first character
+;	for which PRED returns #f. That character is left on the stream.
+;	All the results of evaluating of PRED up to #f are returned in a
+;	string.
+;
+;	PRED is a procedure that takes one argument (a character
+;	or the EOF object) and returns a character or #f. The returned
+;	character does not have to be the same as the input argument
+;	to the PRED. For example,
+;	(next-token-of (lambda (c)
+;			  (cond ((eof-object? c) #f)
+;				((char-alphabetic? c) (char-downcase c))
+;				(else #f))))
+;	will try to read an alphabetic token from the current
+;	input port, and return it in lower case.
+; 
+;	The optional argument PORT defaults to the current input port.
+;
+; Note: since we can't tell offhand how large the token being read is
+; going to be, we make a guess, pre-allocate a string, and grow it by
+; quanta if necessary. The quantum is always the length of the string
+; before it was extended the last time. Thus the algorithm does
+; a Fibonacci-type extension, which has been proven optimal.
+;
+; This procedure is similar to next-token but only it implements
+; an inclusion rather than delimiting semantics.
+
+(define-opt (next-token-of incl-list/pred
+			   (optional (port (current-input-port))) )
+  (let* ((buffer (input-parse:init-buffer))
+	 (curr-buf-len (string-length buffer)) (quantum 16))
+  (if (procedure? incl-list/pred)
+    (let loop ((i 0) (c (peek-char port)))
+      (cond
+        ((incl-list/pred c) =>
+          (lambda (c)
+            (if (>= i curr-buf-len)	; make space for i-th char in buffer
+              (begin			; -> grow the buffer by the quantum
+                (set! buffer (string-append buffer (make-string quantum)))
+                (set! quantum curr-buf-len)
+                (set! curr-buf-len (string-length buffer))))
+            (string-set! buffer i c)
+            (read-char port)			; move to the next char
+            (loop (++ i) (peek-char port))))
+        (else (substring buffer 0 i))))
+			; incl-list/pred is a list of allowed characters
+    (let loop ((i 0) (c (peek-char port)))
+      (cond
+        ((not (memq c incl-list/pred)) (substring buffer 0 i))
+    	(else
+    	  (if (>= i curr-buf-len)	; make space for i-th char in buffer
+    	    (begin			; -> grow the buffer by the quantum
+    	      (set! buffer (string-append buffer (make-string quantum)))
+    	      (set! quantum curr-buf-len)
+    	      (set! curr-buf-len (string-length buffer))))
+    	  (string-set! buffer i c)
+    	  (read-char port)			; move to the next char
+    	  (loop (++ i) (peek-char port))
+    	  ))))))
+
+
+; -- procedure+: read-line [PORT]
+;	Reads one line of text from the PORT, and returns it as a string.
+;	A line is a (possibly empty) sequence of characters terminated
+;	by CR, CRLF or LF (or even the end of file).
+;	The terminating character (or CRLF combination) is removed from
+;	the input stream. The terminating character(s) is not a part
+;	of the return string either.
+;	If EOF is encountered before any character is read, the return
+;	value is EOF.
+; 
+;	The optional argument PORT defaults to the current input port.
+
+(define-opt (read-line (optional (port (current-input-port))) )
+  (if (eof-object? (peek-char port)) (peek-char port)
+    (let* ((line
+             (next-token '() '(#\newline #\return *eof*)
+			 "reading a line" port))
+           (c (read-char port)))	; must be either \n or \r or EOF
+       (and (eq? c #\return) (eq? (peek-char port) #\newline)
+         (read-char port))			; skip \n that follows \r
+       line)))
+
+
+; -- procedure+: read-string N [PORT]
+;	Reads N characters from the PORT, and  returns them in a string.
+;	If EOF is encountered before N characters are read, a shorter string
+;	will be returned.
+;	If N is not positive, an empty string will be returned.
+;	The optional argument PORT defaults to the current input port.
+
+(define-opt (read-string n (optional (port (current-input-port))) )
+  (if (not (positive? n)) ""
+    (let ((buffer (make-string n)))
+      (let loop ((i 0) (c (read-char port)))
+        (if (eof-object? c) (substring buffer 0 i)
+          (let ((i1 (++ i)))
+            (string-set! buffer i c)
+            (if (= i1 n) buffer
+              (loop i1 (read-char port)))))))))
+
+
+; -- Function: find-string-from-port? STR IN-PORT MAX-NO-CHARS
+;    Looks for a string STR within the first MAX-NO-CHARS chars of the
+;    input port IN-PORT
+;    MAX-NO-CHARS may be omitted: in that case, the search span would be
+;    limited only by the end of the input stream.
+;    When the STR is found, the function returns the number of
+;    characters it has read from the port, and the port is set
+;    to read the first char after that (that is, after the STR)
+;    The function returns #f when the string wasn't found
+; Note the function reads the port *STRICTLY* sequentially, and does not
+; perform any buffering. So the function can be used even if the port is open
+; on a pipe or other communication channel.
+;
+; Probably can be classified as misc-io.
+;
+; Notes on the algorithm.
+; A special care should be taken in a situation when one had achieved a partial
+; match with (a head of) STR, and then some unexpected character appeared in
+; the stream. It'll be rash to discard all already read characters. Consider
+; an example of string "acab" and the stream "bacacab...", specifically when
+;    a  c  a _b_
+; b  a  c  a  c  a  b ...
+; that is, when 'aca' had matched, but then 'c' showed up in the stream
+; while we were looking for 'b'. In that case, discarding all already read
+; characters and starting the matching process from scratch, that is,
+; from 'c a b ...', would miss a certain match.
+; Note, we don't actually need to keep already read characters, or at least
+; strlen(str) characters in some kind of buffer. If there has been no match,
+; we can safely discard read characters. If there was some partial match,
+; we already know the characters before, they are in the STR itself, so
+; we don't need a special buffer for that.
+
+;;; "MISCIO" Search for string from port.
+; Written 1995 by Oleg Kiselyov (oleg@ponder.csci.unt.edu)
+; Modified 1996 by A. Jaffer (jaffer@ai.mit.edu)
+;
+; This code is in the public domain.
+
+(define (MISCIO:find-string-from-port? str <input-port> . max-no-char)
+  (set! max-no-char (if (null? max-no-char) #f (car max-no-char)))
+  (letrec
+      ((no-chars-read 0)
+       (my-peek-char			; Return a peeked char or #f
+	(lambda () (and (or (not max-no-char) (< no-chars-read max-no-char))
+			(let ((c (peek-char <input-port>)))
+			  (if (eof-object? c) #f c)))))
+       (next-char (lambda () (read-char <input-port>)
+			  (set! no-chars-read  (+ 1 no-chars-read))))
+       (match-1st-char			; of the string str
+	(lambda ()
+	  (let ((c (my-peek-char)))
+	    (if (not c) #f
+		(begin (next-char)
+		       (if (char=? c (string-ref str 0))
+			   (match-other-chars 1)
+			   (match-1st-char)))))))
+       ;; There has been a partial match, up to the point pos-to-match
+       ;; (for example, str[0] has been found in the stream)
+       ;; Now look to see if str[pos-to-match] for would be found, too
+       (match-other-chars
+	(lambda (pos-to-match)
+	  (if (>= pos-to-match (string-length str))
+	      no-chars-read		; the entire string has matched
+	      (let ((c (my-peek-char)))
+		(and c
+		     (if (not (char=? c (string-ref str pos-to-match)))
+			 (backtrack 1 pos-to-match)
+			 (begin (next-char)
+				(match-other-chars (+ 1 pos-to-match)))))))))
+
+       ;; There had been a partial match, but then a wrong char showed up.
+       ;; Before discarding previously read (and matched) characters, we check
+       ;; to see if there was some smaller partial match. Note, characters read
+       ;; so far (which matter) are those of str[0..matched-substr-len - 1]
+       ;; In other words, we will check to see if there is such i>0 that
+       ;; substr(str,0,j) = substr(str,i,matched-substr-len)
+       ;; where j=matched-substr-len - i
+       (backtrack
+	(lambda (i matched-substr-len)
+	  (let ((j (- matched-substr-len i)))
+	    (if (<= j 0)
+	      (match-1st-char)	; backed off completely to the begining of str
+	      (let loop ((k 0))
+	        (if (>= k j)
+	           (match-other-chars j) ; there was indeed a shorter match
+	           (if (char=? (string-ref str k)
+	           	       (string-ref str (+ i k)))
+	             (loop (+ 1 k))
+	             (backtrack (+ 1 i) matched-substr-len))))))))
+       )
+    (match-1st-char)))
+
+(define find-string-from-port? MISCIO:find-string-from-port?)
+
+;; ======================================================================
+;; char-encoding 
+;; ======================================================================
+
+(define ascii->char integer->char)
+
+;	ucscode->char INT -> CHAR
+; Return a character whose UCS (ISO/IEC 10646) code is INT
+; Note
+; This function is required for processing of XML character entities:
+; According to Section "4.1 Character and Entity References"
+; of the XML Recommendation:
+;  "[Definition: A character reference refers to a specific character
+;   in the ISO/IEC 10646 character set, for example one not directly
+;   accessible from available input devices.]"
+
+(define (ucscode->char code)
+  (cond-expand
+    (bigloo
+      (ucs2->char (integer->ucs2 code)))
+    ((or scheme48 scsh)			; Scheme48 has no support for UCS
+      (ascii->char code))
+    (else
+      (integer->char code))))
+
+; Commonly used control characters
+(define char-space   #\space)
+(define char-return  #\return)
+(define char-tab     #\tab)
+(define char-newline #\newline) ; a.k.a. #\newline, per R5RS
+(define nl 	     "\n")
+

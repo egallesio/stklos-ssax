@@ -1,0 +1,59 @@
+;;;;
+;;;; make-source.stk	-- Building the source file for ssax-core.stk
+;;;; 
+;;;; Copyright © 2007 Erick Gallesio - I3S-CNRS/ESSI <eg@essi.fr>
+;;;; 
+;;;; 
+;;;; This program is free software; you can redistribute it and/or modify
+;;;; it under the terms of the GNU General Public License as published by
+;;;; the Free Software Foundation; either version 2 of the License, or
+;;;; (at your option) any later version.
+;;;; 
+;;;; This program is distributed in the hope that it will be useful,
+;;;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;;; GNU General Public License for more details.
+;;;; 
+;;;; You should have received a copy of the GNU General Public License
+;;;; along with this program; if not, write to the Free Software
+;;;; Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, 
+;;;; USA.
+;;;; 
+;;;;           Author: Erick Gallesio [eg@essi.fr]
+;;;;    Creation date: 04-Jul-2007 11:41 (eg)
+;;;; Last file update: 12-Jul-2007 16:55 (eg)
+;;;;
+
+(define (generate input output output-test)
+  (let ((in   (open-input-file input))
+	(out1 (open-output-file output))
+	(out2 (open-output-file output-test))
+	(msg  (format ";; File automatically generated on ~S\n;; *DO NOT EDIT*\n"
+		      (date)))
+	(eof  "\n;;EOF\n"))
+    ;; A small prelude
+    (display msg out1)
+    (display msg out2)
+    ;; Parse input and split code and tests
+    (let loop ((x (read in)))
+      (cond
+	((eof-object? x)
+	 (display eof out1)
+	 (display eof out2))
+	((and (pair? x) (eq? (car x) 'run-test))
+	 (write x out2)
+	 (newline out2)
+	 (loop (read in)))
+	(else
+	 (pp x :port out1)
+	 ; (write x out1)     
+	 (newline out1)
+	 (loop (read in)))))))
+
+(define (main args)
+  (read-case-sensitive #t)
+  (if (= (length args) 4)
+      (generate (cadr args) (caddr args) (cadddr args))
+      (die (format "Usage: ~a source-with-test out-source out-test"
+		   (program-name)))))
+

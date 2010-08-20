@@ -1,0 +1,12 @@
+;;; Test for ScmPkg package stklos-ssax
+;;;
+;;;           Author: Erick Gallesio [eg@essi.fr]
+;;;    Creation date: 11-Jul-2007 15:57 (eg)
+;;; Last file update: 12-Jul-2007 16:57 (eg)
+;;;
+
+(interface stklos-ssax-test
+  (language stklos)
+  (import stklos-ssax)
+  (export (run args)))
+

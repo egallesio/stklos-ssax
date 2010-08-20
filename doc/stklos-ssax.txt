@@ -1,0 +1,39 @@
+STKLOS-SSAX package
+===================
+
+The STKLOS-SSAX is a port of the Oleg Kiselyov's XML parser on
+STklos. The documentation of this package can be found on 
+the official http://ssax.sourceforge.net[SSAX homepage].
+
+
+Exported symbols
+-----------------
+
+Exported syntaxes
+~~~~~~~~~~~~~~~~~
+  - ssax:make-pi-parser
+  - ssax:make-elem-parser 
+  - ssax:make-parser
+  
+
+Exported functions
+~~~~~~~~~~~~~~~~~~
+
+  - ssax:xml->sxml
+  - ssax:set-parser-error-proc!   (see below)
+  - ssax:set-parser-warning-proc! (see below)
+
+Exported variable
+~~~~~~~~~~~~~~~~~
+  - ssax:Prefix-XML
+
+
+Error and Warning procedures
+----------------------------
+
+This package provides a default warning and error procedures. They can
+be replaced by using ssax:set-parser-warning-proc! or 
+ssax:set-parser-error-proc!. These procedures return the old warning
+or error procedure. 
+
+

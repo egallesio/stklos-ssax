@@ -1,0 +1,8 @@
+; -*- Scheme -*-
+((description "Oleg Kiselyov's XML parser")
+ (version "5.1.1")
+ (author "Oleg Kiselyov <oleg at pobox.com>")
+ (maitainer "Erick Gallesio <eg at unice.fr>")
+ (license gpl-v2)
+ (stklos-doc (html))
+ (keywords parsing xml stklos))

@@ -1,0 +1,62 @@
+;;; Test for ScmPkg package stklos-ssax
+;;;
+;;;           Author: Erick Gallesio [eg@essi.fr]
+;;;    Creation date: 11-Jul-2007 15:57 (eg)
+;;; Last file update: 12-Jul-2007 16:58 (eg)
+;;;
+
+(require-library "pp")
+
+;; This is UGLY, but the test are in interspersed in the source and use
+;; function and macro which are not exported. Place ourselves in in the
+;; stklos-ssax to avoid the problem 
+
+(define-module stklos-ssax
+;;
+;; Some utilities
+;;
+(define (list-intersperse src-l elem)
+  (if (null? src-l) src-l
+      (let loop ((l (cdr src-l)) (dest (cons (car src-l) '())))
+	(if (null? l) (reverse dest)
+	    (loop (cdr l) (cons (car l) (cons elem dest)))))))
+
+(define-macro run-test
+  (lambda body
+    (define (re-write body)
+      (cond
+	((vector? body)
+ 	 (list->vector (re-write (vector->list body))))
+	((not (pair? body)) body)
+	((and (eq? 'quote (car body)) (pair? (cdr body))
+ 	      (string? (cadr body)))
+ 	 (string->symbol (cadr body)))
+	(else (cons (re-write (car body)) (re-write (cdr body))))))
+    (cons 'begin (re-write body))))
+
+(define-macro (failed? . stmts)
+  `(with-handler (lambda (c)
+		   (format (current-error-port)
+			   "*** Failed evaluation of ~S (as expected)\n"
+			   ',stmts)
+		   #t)
+      ,@stmts
+      #f))
+
+;; This include is useful to find macros which have disappeared with compilation.
+;; Functions define in this file are already in the package and are redefined
+;; to themselves will be redefined. This is UGLY but simpler.
+(include "../ssax-prelude.stk")  
+
+;;
+;; The tests extracted of the original source file
+;;
+  (include "ssax-test-body.stk"))
+
+;; ----------------------------------------------------------------------
+;;	run ...
+;; ----------------------------------------------------------------------
+(define (run names)
+  (display "====================================================================\n")
+  (display "If you see this message, all the test have been run successfully!!!!\n")
+  (display "====================================================================\n"))
