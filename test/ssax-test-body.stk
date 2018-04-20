@@ -1,5 +1,8 @@
-;; File automatically generated on "Thu Aug 14 19:40:57 2008"
+;; File automatically generated on "Fri Aug 20 18:27:24 2010"
 ;; *DO NOT EDIT*
+
+(define (pp arg) (write arg))
+
 (run-test (define (equal_? e1 e2) (if (eq? 'A (string->symbol "A")) (equal? e1 e2) (cond ((symbol? e1) (and (symbol? e2) (string-ci=? (symbol->string e1) (symbol->string e2)))) ((pair? e1) (and (pair? e2) (equal_? (car e1) (car e2)) (equal_? (cdr e1) (cdr e2)))) ((vector? e1) (and (vector? e2) (equal_? (vector->list e1) (vector->list e2)))) (else (equal? e1 e2))))))
 (run-test (define (unesc-string str) (call-with-input-string str (lambda (port) (let loop ((frags '())) (let* ((token (next-token '() '(#\% *eof*) "unesc-string" port)) (cterm (read-char port)) (frags (cons token frags))) (if (eof-object? cterm) (string-concatenate-reverse/shared frags) (let ((cchar (read-char port))) (if (eof-object? cchar) (error "unexpected EOF after reading % in unesc-string:" str) (loop (cons (case cchar ((#\n) (string #\newline)) ((#\r) (string char-return)) ((#\t) (string char-tab)) ((#\%) "%") (else (error "bad %-char in unesc-string:" cchar))) frags)))))))))))
 (run-test (assert (eq? '_ (call-with-input-string "_" ssax:read-NCName))) (assert (eq? '_ (call-with-input-string "_" ssax:read-QName))) (assert (eq? (string->symbol "_abc_") (call-with-input-string "_abc_;" ssax:read-NCName))) (assert (eq? (string->symbol "_abc_") (call-with-input-string "_abc_;" ssax:read-QName))) (assert (eq? (string->symbol "_a.b") (call-with-input-string "_a.b " ssax:read-QName))) (assert (equal? (cons (string->symbol "_a.b") (string->symbol "d.1-ef-")) (call-with-input-string "_a.b:d.1-ef-;" ssax:read-QName))) (assert (equal? (cons (string->symbol "a") (string->symbol "b")) (call-with-input-string "a:b:c" ssax:read-QName))) (assert (failed? (call-with-input-string ":abc" ssax:read-NCName))) (assert (failed? (call-with-input-string "1:bc" ssax:read-NCName))))

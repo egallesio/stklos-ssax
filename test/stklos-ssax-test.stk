@@ -2,10 +2,10 @@
 ;;;
 ;;;           Author: Erick Gallesio [eg@essi.fr]
 ;;;    Creation date: 11-Jul-2007 15:57 (eg)
-;;; Last file update: 12-Jul-2007 16:58 (eg)
+;;; Last file update: 20-Aug-2010 18:09 (eg)
 ;;;
 
-(require-library "pp")
+;(require-library "pp")
 
 ;; This is UGLY, but the test are in interspersed in the source and use
 ;; function and macro which are not exported. Place ourselves in in the

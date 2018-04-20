@@ -1,7 +1,7 @@
 ;;;;
 ;;;; make-source.stk	-- Building the source file for ssax-core.stk
 ;;;; 
-;;;; Copyright © 2007 Erick Gallesio - I3S-CNRS/ESSI <eg@essi.fr>
+;;;; Copyright © 2007-2010 Erick Gallesio - I3S-CNRS/ESSI <eg@essi.fr>
 ;;;; 
 ;;;; 
 ;;;; This program is free software; you can redistribute it and/or modify
@@ -21,7 +21,7 @@
 ;;;; 
 ;;;;           Author: Erick Gallesio [eg@essi.fr]
 ;;;;    Creation date: 04-Jul-2007 11:41 (eg)
-;;;; Last file update: 12-Jul-2007 16:55 (eg)
+;;;; Last file update: 20-Aug-2010 18:27 (eg)
 ;;;;
 
 (define (generate input output output-test)
@@ -30,10 +30,13 @@
 	(out2 (open-output-file output-test))
 	(msg  (format ";; File automatically generated on ~S\n;; *DO NOT EDIT*\n"
 		      (date)))
+	(ppt  "\n(define (pp arg) (write arg))\n\n")
 	(eof  "\n;;EOF\n"))
     ;; A small prelude
     (display msg out1)
     (display msg out2)
+    (display ppt out1)
+    (display ppt out2)
     ;; Parse input and split code and tests
     (let loop ((x (read in)))
       (cond

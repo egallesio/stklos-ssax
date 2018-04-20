@@ -1,5 +1,8 @@
-;; File automatically generated on "Thu Aug 14 19:40:57 2008"
+;; File automatically generated on "Fri Aug 20 18:27:24 2010"
 ;; *DO NOT EDIT*
+
+(define (pp arg) (write arg))
+
 (define-struct xml-token kind head)
 
 (define (string-whitespace? str)
